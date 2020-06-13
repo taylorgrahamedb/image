@@ -11,7 +11,7 @@ include $(cnf)
 export $(shell sed 's/=.*//' $(cnf))
 
 # HELP
-# This will output the help me for each task
+# This will output the help me again for each task
 # thanks to https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 .PHONY: help build_container push-contain ser
 
