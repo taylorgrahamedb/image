@@ -15,7 +15,7 @@ export $(shell sed 's/=.*//' $(cnf))
 # thanks to https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 .PHONY: help build_container push-contain ser
 
-help: ## This help me s.
+help: ## This helps me s.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .DEFAULT_GOAL := help
