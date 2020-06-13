@@ -5,7 +5,7 @@ NOCACHE_ARG=
 BUILD_FLAG=build-arg
 
 # import config.
-# You can change the default config with `make cnf="config_special.env" build`
+# You can change the default configd with `make cnf="config_special.env" build`
 cnf ?= config.env
 include $(cnf)
 export $(shell sed 's/=.*//' $(cnf))
