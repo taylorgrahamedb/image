@@ -1,0 +1,125 @@
+ARG OS
+ARG TAG
+ARG POSTGRESQL_VERSION
+
+FROM ${OS}:${TAG}
+
+MAINTAINER Oscar M Herrera <oscar.herrera@enterprisedb.com>
+
+ARG YUMUSER
+ARG YUMPASSWORD
+ARG EPAS_PACKAGE
+ARG EFM_PACKAGE
+ARG EDB_REPO_RPM_URL
+ARG EDB_REPO
+ARG EDB_BASEURL
+ARG EDB_LOCAL_REPO_NAME
+ARG EPAS_VERSION
+ENV PGOWNER enterprisedb
+
+
+################################################################################
+# install all require utilities
+################################################################################
+RUN yum clean all && yum install sudo policycoreutils -y \
+    && rpm -Uvh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
+    && echo notify_only=0 >> /etc/yum/pluginconf.d/search-disabled-repos.conf
+RUN if [[ ${OS_VERSION} != *"ubi"* ]]; then yum-config-manager --enable rhel-7-server-optional-rpms; \
+    else  yum-config-manager --enable ubi-7-server-optional-rpms; \
+    fi
+
+
+################################################################################
+# Installing dependencies that are not in the ubi repos for pg v10 in ubi7
+################################################################################
+RUN if [[ ${OS} == *"ubi"* ]]; then \
+      yum -y install http://mirror.centos.org/centos/7/os/x86_64/Packages/hostname-3.13-3.el7_7.1.x86_64.rpm; \
+      if [[ ${EPAS_PACKAGE} == *"10"* ]]; then \
+      yum -y install http://mirror.centos.org/centos/7/os/x86_64/Packages/libmemcached-1.0.16-5.el7.x86_64.rpm; \
+      fi \
+    fi
+RUN yum clean all
+
+################################################################################
+# Setup OS user enterprisedb to have a password and sudo for debug/testing
+################################################################################
+RUN useradd -ms /bin/bash  enterprisedb \
+  && yum -y install sudo which && yum clean all \
+  && echo -e "enterprisedb\nenterprisedb" | (passwd --stdin enterprisedb) \
+  && gpasswd -a enterprisedb wheel \
+  && sed -i 's/%wheel.*/%wheel ALL=(ALL) NOPASSWD: ALL/' /etc/sudoers \
+  && sed -i 's/Defaults.*requiretty/Defaults !requiretty/' /etc/sudoers \
+  && yum clean all
+
+
+################################################################################
+# SETUP Base EPAS
+################################################################################
+#################################################################################
+# add the EDB repository in container and enable the repository
+################################################################################
+RUN which sed
+RUN rpm -Uvh ${EDB_REPO_RPM_URL}
+RUN sed -i "s/<username>:<password>/${EDB_YUMUSERNAME}:${EDB_YUMPASSWORD}/g" /etc/yum.repos.d/edb.repo
+RUN yum-config-manager --enable ${EDB_REPO} enterprisedb-tools enterprisedb-dependencies
+RUN yum update -y
+RUN yum clean all
+
+################################################################################
+# Install all EPAS RPMs
+################################################################################
+RUN yum -y install ${EPAS_PACKAGE}-server-core
+RUN if [[ ${EPAS_PACKAGE} != *"10"* ]]; then yum -y install ${EPAS_PACKAGE}-server-llvmjit ; fi
+RUN  yum -y install ${EPAS_PACKAGE}-server-libs        \
+&&   yum -y install ${EPAS_PACKAGE}-server-contrib     \
+&&   yum -y install ${EPAS_PACKAGE}-server-sslutils    \
+&&   yum -y install ${EPAS_PACKAGE}-server-sqlprofiler  \
+&&   yum -y install ${EPAS_PACKAGE}-server-sqlprotect   \
+&&   yum -y install ${EPAS_PACKAGE}-server-pldebugger   \
+&&   yum -y --skip-broken install ${EPAS_PACKAGE}-postgis-core  \
+&&   yum clean all
+
+#######################################################################################
+#######################################################################################
+# Starting actual build of the Advanced Server Container
+#######################################################################################
+
+ENV PG_USER_DATABASE edb
+ENV USER ${PGOWNER}
+ENV PG_ROOT="/var/lib/edb"
+ENV PGDATA_HOME "${PG_ROOT}/as${EPAS_VERSION}"
+ENV PGDATA "${PG_ROOT}/data"
+ENV PGDATA_XLOG "${PG_ROOT}/pg_wal"
+ENV PGDATA_ARCHIVE "${PG_ROOT}/wal_archive"
+ENV MANAGE_CONFIG ""
+ENV PGBIN "/usr/edb/as${EPAS_VERSION}/bin"
+
+
+################################################################################
+# Copy Launch command
+################################################################################
+
+COPY src/common/launch.sh /
+COPY src/common/config.sh /
+COPY src/common/police.sh /
+RUN sudo chmod +x /launch.sh  \
+&&  sudo chmod +x /config.sh  \
+&&  sudo chmod +x /police.sh
+################################################################################
+# Make Archive Directory
+################################################################################
+
+USER ${PGOWNER}
+RUN mkdir ${PGDATA} \
+  && mkdir $PGDATA_XLOG \
+  && mkdir ${PGDATA_ARCHIVE}
+
+ENV WALE_ENV_DIR=$RW_DIR/etc/wal-e.d/env \
+    LOG_ENV_DIR=$RW_DIR/etc/log.d/env
+
+USER ${PGOWNER}
+RUN whoami
+USER enterprisedb
+EXPOSE 5432 5444
+
+CMD ["/bin/sh", "/launch.sh"]

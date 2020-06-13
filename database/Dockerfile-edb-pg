@@ -1,0 +1,122 @@
+ARG OS
+ARG TAG
+ARG EXT
+ARG POSTGRESQL_VERSION
+
+FROM ${OS}:${TAG}
+
+
+MAINTAINER Oscar M Herrera <oscar@kss-inc.com>
+
+ARG EPAS_PACKAGE
+ARG EDB_REPO_RPM_URL
+ARG EDB_REPO
+ARG EDB_BASEURL
+ARG EDB_LOCAL_REPO_NAME
+ARG POSTGRESQL_VERSION
+
+
+ENV PGOWNER postgres
+ENV USER ${PGOWNER}
+ENV PG_ROOT "/var/lib/edb"
+ENV PGDATA_HOME ${PG_ROOT}
+ENV PGDATA "${PG_ROOT}/data"
+ENV PGDATA_XLOG "${PG_ROOT}/pg_wal"
+ENV PGDATA_ARCHIVE "${PG_ROOT}/wal_archive"
+ENV MANAGE_CONFIG ""
+ENV PGBIN="/usr/pgsql-12/bin"
+ENV EDB_PG_VERSION=PG-${POSTGRESQL_VERSION}
+
+
+ENV PGOWNER postgres
+
+################################################################################
+# install all require utilities
+################################################################################
+#RUN yum clean all && yum install sudo policycoreutils -y \
+#    && rpm -Uvh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
+#    && echo notify_only=0 >> /etc/yum/pluginconf.d/search-disabled-repos.conf \
+#    && yum-config-manager --enable rhel-7-server-optional-rpms
+
+################################################################################
+# install all require utilities
+################################################################################
+RUN yum clean all && yum install sudo policycoreutils -y \
+    && rpm -Uvh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm \
+    && echo notify_only=0 >> /etc/yum/pluginconf.d/search-disabled-repos.conf
+RUN if [[ ${OS_VERSION} != *"ubi"* ]]; then yum-config-manager --enable rhel-7-server-optional-rpms; \
+    else  yum-config-manager --enable ubi-7-server-optional-rpms; \
+    fi
+
+
+
+################################################################################
+# Installing dependencies that are not in the ubi repos for pg v10 in ubi7
+################################################################################
+RUN if [[ ${OS} == *"ubi"* ]]; then \
+      yum -y install http://mirror.centos.org/centos/7/os/x86_64/Packages/hostname-3.13-3.el7_7.1.x86_64.rpm; \
+      if [[ ${EPAS_PACKAGE} == *"10"* ]]; then \
+      yum -y install http://mirror.centos.org/centos/7/os/x86_64/Packages/libmemcached-1.0.16-5.el7.x86_64.rpm; \
+      fi \
+    fi
+RUN if [[ ${OS} == *"oci"* ]]; then \
+      yum -y install http://mirror.centos.org/centos/7/os/x86_64/Packages/hostname-3.13-3.el7_7.1.x86_64.rpm; \
+      if [[ ${EPAS_PACKAGE} == *"10"* ]]; then \
+      yum -y install http://mirror.centos.org/centos/7/os/x86_64/Packages/libmemcached-1.0.16-5.el7.x86_64.rpm; \
+      fi \
+    fi
+RUN yum clean all
+
+RUN yum -y install https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm \
+    && yum -y clean all
+
+# Separate yum run matching postgres image, leverages cached layer
+RUN yum -y install \
+  postgresql${POSTGRESQL_VERSION}.x86_64 \
+  postgresql${POSTGRESQL_VERSION}-libs.x86_64 \
+	postgresql${POSTGRESQL_VERSION}-contrib.x86_64 \
+	postgresql${POSTGRESQL_VERSION}-server.x86_64 \
+	psmisc \
+	rsync \
+	less \
+	&& yum -y clean all
+
+
+RUN gpasswd -a postgres wheel \
+  && sed -i 's/%wheel.*/%wheel ALL=(ALL) NOPASSWD: ALL/' /etc/sudoers \
+  && sed -i 's/Defaults.*requiretty/Defaults !requiretty/' /etc/sudoers
+
+COPY src/common/launch.sh /
+COPY src/common/config.sh /
+COPY src/common/police.sh /
+
+USER root
+RUN chmod +x /launch.sh
+RUN chmod +x /config.sh
+RUN chmod +x /police.sh
+################################################################################
+# Make Archive Directory
+################################################################################
+
+RUN mkdir -p ${PGDATA} \
+  && mkdir -p ${PGDATA_XLOG} \
+  && mkdir -p ${PGDATA_ARCHIVE} \
+  && mkdir -p /usr/edb
+
+RUN ln -s ${PGBIN} /usr/edb/bin
+
+RUN chown -R ${PGOWNER}:${PGOWNER} ${PGDATA} \
+&&  chown -R ${PGOWNER}:${PGOWNER} ${PGDATA_XLOG} \
+&&  chown -R ${PGOWNER}:${PGOWNER} ${PGDATA_ARCHIVE} \
+&&  chown -R ${PGOWNER}:${PGOWNER} /var/lib/edb \
+&&  chown -R ${PGOWNER}:${PGOWNER} /usr/edb
+
+ENV WALE_ENV_DIR=$RW_DIR/etc/wal-e.d/env \
+    LOG_ENV_DIR=$RW_DIR/etc/log.d/env
+
+USER ${PGOWNER}
+USER postgres
+
+EXPOSE 5432 5444
+
+CMD ["/usr/bin/tail", "-f", "/dev/null"]

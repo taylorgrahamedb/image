@@ -1,0 +1,40 @@
+ARG EXT
+ARG TAG
+ARG OS_NAME
+ARG OS_VERSION
+
+FROM gcr.io/edb-oscar/edb-stolon-builder.${EXT}:latest as builder
+MAINTAINER Oscar M Herrera <oscar.herrera@enterprisedb.com>
+
+RUN ls -al /stolon
+RUN ls -al /walg
+
+FROM ${OS_NAME}:${OS_VERSION}
+
+################################################################################
+# Installing dependencies that are not in the ubi repos for pg v10 in ubi7
+################################################################################
+RUN if [[ ${TAG} == *"ubi"* ]]; then \
+      yum -y install http://mirror.centos.org/centos/7/os/x86_64/Packages/hostname-3.13-3.el7_7.1.x86_64.rpm; \
+    fi
+
+ENV GOROOT=/usr/local/go
+ENV PATH="$GOPATH/bin:/usr/local/bin:$PATH"
+
+RUN adduser --system --shell /bin/bash stolon   && \
+    usermod -a -G root stolon
+
+COPY --from=builder /stolon/* /usr/local/bin/
+COPY --from=builder /walg/wal-g /usr/local/bin/
+ADD src/edb-scripts/base-backup-job.sh /usr/local/bin/
+
+RUN ls -al /usr/local/bin/ \
+&&  chmod +x /usr/local/bin/edb-stolon-keeper /usr/local/bin/stolon-sentinel /usr/local/bin/stolon-proxy /usr/local/bin/stolonctl /usr/local/bin/wal-g /usr/local/bin/base-backup-job.sh
+
+USER stolon
+
+EXPOSE 5444
+EXPOSE 5432
+EXPOSE 8080
+
+ENTRYPOINT ["tail", "-f", "/dev/null"]

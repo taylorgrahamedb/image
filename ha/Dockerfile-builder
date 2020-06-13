@@ -1,0 +1,121 @@
+###############################################################################
+# This is a builder container strictly for building the stolon binaries
+# Under the same operating system as they will run with the database
+# other then the end product binaries everything else in this container
+# is discarded
+###############################################################################
+
+ARG OS_VERSION
+ARG OS_NAME
+
+FROM ${OS_NAME}:${OS_VERSION} as builder
+
+MAINTAINER The CentOS Project <cloud-ops@centos.org>
+LABEL Vendor="CentOS" \
+      License=GPLv2 \
+      Version=2.4.6-40
+
+ARG STOLON_REPO
+
+
+RUN yum -y --releasever 7 --setopt install_weak_deps=false --setopt tsflags=nodocs --setopt override_install_langs=en_US.utf8 install wget
+RUN yum -y --releasever 7 --setopt install_weak_deps=false --setopt tsflags=nodocs --setopt override_install_langs=en_US.utf8 install git
+RUN yum -y --releasever 7 --setopt install_weak_deps=false --setopt tsflags=nodocs --setopt override_install_langs=en_US.utf8 install make
+
+#RUN yum -y --releasever 7 --setopt install_weak_deps=false --setopt tsflags=nodocs groupinstall "Development Tools"
+RUN yum clean all
+
+RUN wget https://dl.google.com/go/go1.14.2.linux-amd64.tar.gz && \
+    tar -xvf go1.14.2.linux-amd64.tar.gz
+
+RUN mv go /usr/local
+
+RUN mkdir -p /stolon-build \
+&& mkdir -p /stolon
+
+WORKDIR /home/stolon-build
+RUN pwd
+RUN git clone ${STOLON_REPO} \
+&& rm -rf /home/stolon-build/edb-stolon/go.sum
+
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/var/lib/edb/bin
+ENV PATH="$GOROOT/bin:$PATH"
+
+# RUN chmod -v +rx /home/stolon-build/edb-stolon/build
+RUN ls -al /home/stolon-build/edb-stolon/
+WORKDIR /home/stolon-build/edb-stolon
+RUN make -f ./EDB-Makefile
+
+##### Lets start the WAL-G integration
+RUN mkdir -p /walg
+WORKDIR /walg
+
+RUN wget https://github.com/wal-g/wal-g/releases/download/v0.1.15/wal-g.linux-amd64.tar.gz && \
+    tar -xvf wal-g.linux-amd64.tar.gz
+
+RUN cp /home/stolon-build/edb-stolon/bin/stolonctl /stolon
+RUN cp /home/stolon-build/edb-stolon/bin/edb-stolon-keeper /stolon
+RUN cp /home/stolon-build/edb-stolon/bin/stolon-proxy /stolon
+RUN cp /home/stolon-build/edb-stolon/bin/stolon-sentinel /stolon
+RUN rm -rf /home/stolon-build
+
+
+#############################################################################
+# Build the Task Runner Action app
+#############################################################################
+RUN cd /home
+RUN mkdir /home/actions
+WORKDIR  /home/actions
+
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/var/lib/edb/bin
+ENV PATH="$GOROOT/bin:$PATH"
+
+RUN git clone ${ACTION_REPO} \
+&& rm -rf /home/actions/TaskRunner/go.sum
+
+RUN pwd
+RUN ls -al .
+
+WORKDIR /home/actions/TaskRunner
+RUN pwd
+RUN make dbtaskrunner
+RUN cp release/DBTaskRunner /stolon
+
+#############################################################################
+# Build the pgx_exporter app
+#############################################################################
+RUN cd /home
+RUN mkdir /home/exporter
+WORKDIR  /home/exporter
+
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/var/lib/edb/bin
+ENV PATH="$GOROOT/bin:$PATH"
+
+RUN git clone ${PGXX_REPO} \
+&& rm -rf /home/exporter/pgx_exporter/go.sum
+
+RUN pwd
+RUN ls -al .
+
+WORKDIR /home/exporter/pgx_exporter
+RUN pwd
+RUN make pgx_exporter
+RUN cp release/pgx_exporter /stolon
+
+#############################################################################
+# Finishing Building clean things up
+#############################################################################
+RUN yum -y --setopt=tsflags=nodocs remove git
+RUN yum -y --setopt=tsflags=nodocs remove gcc-go
+RUN yum clean all
+RUN rm -rf /go1.14.2.linux-amd64.tar.gz
+RUN rm -rf /var/cache/yum
+RUN rm -rf /usr/local/go
+
+RUN yum -y group remove "Development Tools" && \
+    yum clean all
+
+RUN ls -al /stolon

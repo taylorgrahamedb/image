@@ -1,0 +1,34 @@
+ARG EXT
+ARG TAG
+ARG OS_NAME
+ARG OS_VERSION
+
+FROM gcr.io/edb-oscar/edb-stolon-builder.${EXT}:latest as builder
+MAINTAINER Oscar M Herrera <oscar.herrera@enterprisedb.com>
+
+RUN ls -al /stolon
+RUN ls -al /walg
+
+FROM ${OS_NAME}:${OS_VERSION}
+
+################################################################################
+# Installing dependencies that are not in the ubi repos for pg v10 in ubi7
+################################################################################
+RUN if [[ ${TAG} == *"ubi"* ]]; then \
+      yum -y install http://mirror.centos.org/centos/7/os/x86_64/Packages/hostname-3.13-3.el7_7.1.x86_64.rpm; \
+    fi
+
+ENV GOROOT=/usr/local/go
+ENV PATH="$GOPATH/bin:/usr/local/bin:$PATH"
+
+RUN adduser --system --shell /bin/bash jackson   && \
+    usermod -a -G root jackson
+
+COPY --from=builder /stolon/DBTaskRunner /usr/local/bin/
+COPY --from=builder /stolon/stolonctl /usr/local/bin/
+
+RUN ls -al /usr/local/bin/ \
+&&  chmod +x /usr/local/bin/DBTaskRunner
+USER jackson
+
+ENTRYPOINT ["tail", "-f", "/dev/null"]

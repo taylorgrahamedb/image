@@ -1,0 +1,48 @@
+ARG EXT
+ARG TAG
+ARG POSTGRESQL_VERSION
+ARG EDB_STOLON
+ARG DOCKER_REPO
+ARG DISTRO
+
+FROM ${DOCKER_REPO}/${EDB_STOLON}.${EXT}:latest as stolon
+MAINTAINER Oscar M Herrera <oscar.herrera@enterprisedb.com>
+
+RUN ls -al /usr/local/bin/
+
+######################################################
+FROM ${DOCKER_REPO}/edb-${DISTRO}-${TAG}.${EXT}:v${POSTGRESQL_VERSION} as database
+
+ENV GOROOT=/usr/local/go
+ENV PATH="$GOPATH/bin:/usr/local/bin:$PATH"
+ENV POD_NAME=${POD_ID}
+
+USER root
+
+RUN /bin/hostname
+
+RUN adduser --system --shell /bin/bash stolon   && \
+    usermod -a -G root stolon
+
+ADD src/edb-scripts/base-backup-job.sh /usr/local/bin/
+ADD src/edb-scripts/launch-keeper.sh /usr/local/bin/
+
+RUN ls -al /usr/local/bin/
+
+COPY --from=stolon /usr/local/bin/edb-stolon-keeper /usr/local/bin/
+COPY --from=stolon /usr/local/bin/stolon-sentinel /usr/local/bin/
+COPY --from=stolon /usr/local/bin/stolon-proxy /usr/local/bin/
+COPY --from=stolon /usr/local/bin/stolonctl /usr/local/bin/
+COPY --from=stolon /usr/local/bin/wal-g /usr/local/bin/
+
+RUN ls -al /usr/local/bin/
+RUN chmod +x /usr/local/bin/edb-stolon-keeper /usr/local/bin/stolon-sentinel /usr/local/bin/stolon-proxy /usr/local/bin/stolonctl /usr/local/bin/wal-g /usr/local/bin/launch-keeper.sh /usr/local/bin/base-backup-job.sh
+
+USER ${PGOWNER}
+
+EXPOSE 5444
+EXPOSE 5432
+EXPOSE 8080
+
+
+ENTRYPOINT ["tail", "-f", "/dev/null"]
